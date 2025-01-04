@@ -33,7 +33,7 @@
 int virtioDebugLevel;
 int bDebugPrint;
 int nVioscsiDebugLevel;
-
+BOOLEAN bBreakAlways;
 
 #if !defined(EVENT_TRACING)
 
@@ -90,6 +90,7 @@ void InitializeDebugPrints(IN PDRIVER_OBJECT  DriverObject, IN PUNICODE_STRING R
     virtioDebugLevel = 0;
 #if !defined(RUN_UNCHECKED)
     nVioscsiDebugLevel = TRACE_ALL;
+    bBreakAlways = TRUE;
 #endif
 
 #if defined(PRINT_DEBUG)

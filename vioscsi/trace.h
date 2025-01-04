@@ -75,6 +75,7 @@ void InitializeDebugPrints(IN PDRIVER_OBJECT  DriverObject, IN PUNICODE_STRING R
 extern ULONG driverDebugFlags;
 extern int driverDebugLevel;
 extern int nVioscsiDebugLevel;
+extern BOOLEAN bBreakAlways;
 
 #if !defined(TRACE_LEVEL_NONE)
 #define TRACE_LEVEL_NONE        0
@@ -106,7 +107,7 @@ extern int nVioscsiDebugLevel;
     if ((!bDebugPrint) || Level > nVioscsiDebugLevel) {} \
     else VirtioDebugPrintProc (MSG, __VA_ARGS__)
 #define VioScsiDbgBreak()\
-    if (KD_DEBUGGER_ENABLED && !KD_DEBUGGER_NOT_PRESENT) DbgBreakPoint();
+    if (KD_DEBUGGER_ENABLED && !KD_DEBUGGER_NOT_PRESENT && bBreakAlways) DbgBreakPoint();
 
 #define ENTER_FN() RhelDbgPrint(TRACE_LEVEL_VERBOSE, " --> %s.\n",__FUNCTION__)
 #define EXIT_FN()  RhelDbgPrint(TRACE_LEVEL_VERBOSE, " <-- %s.\n",__FUNCTION__)
@@ -126,6 +127,7 @@ extern int nVioscsiDebugLevel;
 #else
 #pragma warning(disable: 28170)
 #pragma warning(disable: 28251)
+#define VioScsiDbgBreak()
 #include <stortrce.h>
 
 // {194051B2-14C7-4987-A0E9-154377C58882}
