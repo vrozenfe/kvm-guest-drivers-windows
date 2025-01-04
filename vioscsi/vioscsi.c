@@ -515,6 +515,8 @@ ENTER_FN();
     }
     ConfigInfo->NumberOfPhysicalBreaks = adaptExt->max_physical_breaks + 1;
     ConfigInfo->MaximumTransferLength  = adaptExt->max_physical_breaks * PAGE_SIZE;
+    adaptExt->max_transfer_length = ConfigInfo->MaximumTransferLength;
+    VioScsiDbgBreak();
 
     RhelDbgPrint(TRACE_LEVEL_INFORMATION, " NumberOfPhysicalBreaks %d\n", ConfigInfo->NumberOfPhysicalBreaks);
     RhelDbgPrint(TRACE_LEVEL_INFORMATION, " MaximumTransferLength %d\n", ConfigInfo->MaximumTransferLength);
@@ -982,8 +984,32 @@ ENTER_FN();
     }
     else if (srbExt && srbExt->Xfer && srbDataTransferLen > srbExt->Xfer)
     {
+//        VioScsiDbgBreak();
+        RhelDbgPrint(TRACE_LEVEL_FATAL, "0x%p length = %lu dataTransferLen = %lu resp = %d\n", Srb, SRB_GET_DATA_TRANSFER_LENGTH(Srb), srbExt->Xfer, resp->response);
+
+
+        //SRB_SET_DATA_TRANSFER_LENGTH(Srb, srbExt->TransferLen);
+        //srbStatus = SRB_STATUS_DATA_OVERRUN;
+        //SRB_SET_SCSI_STATUS(Srb, SCSISTAT_GOOD);
+
+
         SRB_SET_DATA_TRANSFER_LENGTH(Srb, srbExt->Xfer);
-        srbStatus = SRB_STATUS_DATA_OVERRUN;
+        srbStatus = SRB_STATUS_SUCCESS;// SRB_STATUS_DATA_OVERRUN;// SRB_STATUS_ERROR;
+        PSENSE_DATA senseData = SRB_GET_SENSE_INFO_BUFFER(Srb);
+        UCHAR len = SRB_GET_SENSE_INFO_BUFFER_LENGTH(Srb);
+
+        if (senseData && len >= sizeof(SENSE_DATA))
+        {
+            senseData->ErrorCode = SCSI_SENSE_ERRORCODE_FIXED_CURRENT;
+            senseData->Valid = 1;
+            senseData->SenseKey = SCSI_SENSE_ABORTED_COMMAND;// SCSI_SENSE_ILLEGAL_REQUEST;// SCSI_SENSE_COPY_ABORTED; //SCSI_SENSE_ABORTED_COMMAND
+            senseData->AdditionalSenseCode = SCSI_ADSENSE_COPY_TARGET_DEVICE_ERROR;// 0x29; // Example Additional Sense Code (e.g., underrun error)
+            senseData->AdditionalSenseCodeQualifier = SCSI_SENSEQ_DATA_UNDERRUN;// 0x00; // Example Additional Sense Code Qualifier
+            SRB_SET_SENSE_INFO_BUFFER(Srb, senseData);
+            SRB_SET_SENSE_INFO_BUFFER_LENGTH(Srb, sizeof(SENSE_DATA));
+            srbStatus |= SRB_STATUS_AUTOSENSE_VALID;
+            SRB_SET_SCSI_STATUS(Srb, SCSISTAT_CHECK_CONDITION);
+        }
     }
     SRB_SET_SRB_STATUS(Srb, srbStatus);
     CompleteRequest(DeviceExtension, Srb);
@@ -1361,13 +1387,17 @@ VioScsiBuildIo(
     VirtIOSCSICmd         *cmd;
     UCHAR                 TargetId;
     UCHAR                 Lun;
-
+    ULONG                 dataTransferLen;
+    ULONG                 Sectors;
+    ULONG                 sdbLen = 0;
+    BOOLEAN               bTrim = FALSE;
 ENTER_FN_SRB();
     cdb      = SRB_CDB(Srb);
     srbExt   = SRB_EXTENSION(Srb);
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     TargetId = SRB_TARGET_ID(Srb);
     Lun      = SRB_LUN(Srb);
+    dataTransferLen = SRB_GET_DATA_TRANSFER_LENGTH(Srb);
 
     if( (SRB_PATH_ID(Srb) > (UCHAR)adaptExt->num_queues) ||
         (TargetId >= adaptExt->scsi_config.max_target) ||
@@ -1398,7 +1428,8 @@ ENTER_FN_SRB();
     cmd->req.cmd.prio = 0;
     cmd->req.cmd.crn = 0;
     if (cdb != NULL) {
-        RtlCopyMemory(cmd->req.cmd.cdb, cdb, min(VIRTIO_SCSI_CDB_SIZE, SRB_CDB_LENGTH(Srb)));
+        sdbLen = SRB_CDB_LENGTH(Srb);
+        RtlCopyMemory(cmd->req.cmd.cdb, cdb, min(VIRTIO_SCSI_CDB_SIZE, sdbLen));
     }
 
     sgElement = 0;
@@ -1410,12 +1441,29 @@ ENTER_FN_SRB();
     if (sgList)
     {
         sgMaxElements = min((adaptExt->max_physical_breaks + 1), sgList->NumberOfElements);
-
+        if (dataTransferLen > adaptExt->max_transfer_length)
+        {
+//            VioScsiDbgBreak();
+            sgMaxElements = min(sgMaxElements, (adaptExt->max_transfer_length >> PAGE_SHIFT));
+            bTrim = TRUE;
+        }
         if((SRB_FLAGS(Srb) & SRB_FLAGS_DATA_OUT) == SRB_FLAGS_DATA_OUT) {
-            for (i = 0; i < sgMaxElements; i++, sgElement++) {
-                srbExt->psgl[sgElement].physAddr = sgList->List[i].PhysicalAddress;
-                srbExt->psgl[sgElement].length = sgList->List[i].Length;
-                srbExt->Xfer += sgList->List[i].Length;
+            for (i = 0; (i < sgMaxElements) && (srbExt->Xfer < adaptExt->max_transfer_length); i++ ) {
+                ULONG len = sgList->List[i].Length;
+                PHYSICAL_ADDRESS pa = sgList->List[i].PhysicalAddress;
+                if (len)
+                {
+                    do
+                    {
+                        ULONG inc = min(len, PAGE_SIZE);
+                        srbExt->psgl[sgElement].physAddr = pa;
+                        srbExt->psgl[sgElement].length = inc;
+                        srbExt->Xfer += inc;
+                        len -= inc;
+                        pa.QuadPart += inc;
+                        sgElement++;
+                    } while (len && ((srbExt->Xfer + len) <= adaptExt->max_transfer_length));
+                }
             }
         }
     }
@@ -1426,13 +1474,42 @@ ENTER_FN_SRB();
     sgElement++;
     if (sgList)
     {
-        sgMaxElements = min((adaptExt->max_physical_breaks + 1), sgList->NumberOfElements);
-
         if((SRB_FLAGS(Srb) & SRB_FLAGS_DATA_OUT) != SRB_FLAGS_DATA_OUT) {
-            for (i = 0; i < sgMaxElements; i++, sgElement++) {
-                srbExt->psgl[sgElement].physAddr = sgList->List[i].PhysicalAddress;
-                srbExt->psgl[sgElement].length = sgList->List[i].Length;
-                srbExt->Xfer += sgList->List[i].Length;
+            for (i = 0; (i < sgMaxElements) && (srbExt->Xfer < adaptExt->max_transfer_length); i++) {
+                ULONG len = sgList->List[i].Length;
+                PHYSICAL_ADDRESS pa = sgList->List[i].PhysicalAddress;
+                if (len)
+                {
+                    do
+                    {
+                        ULONG inc = min(len, PAGE_SIZE);
+                        srbExt->psgl[sgElement].physAddr = pa;
+                        srbExt->psgl[sgElement].length = inc;
+                        srbExt->Xfer += inc;
+                        len -= inc;
+                        pa.QuadPart += inc;
+                        sgElement++;
+                    } while (len && ((srbExt->Xfer + len) <= adaptExt->max_transfer_length));
+                }
+            }
+        }
+        if (bTrim)
+        {
+            VioScsiDbgBreak();
+            Sectors = GetSectorCountFromCdb((PCDB)cmd->req.cmd.cdb, sdbLen);
+            if ((srbExt->Xfer > PAGE_SIZE) && (((ULONG_PTR)srbExt->Xfer) & (PAGE_SIZE - 1)) != 0)
+            {
+                srbExt->Xfer >>= PAGE_SHIFT;
+                srbExt->Xfer <<= PAGE_SHIFT;
+            }
+            if (Sectors && srbExt->Xfer)
+            {
+                ULONG newSectors = srbExt->Xfer / SECTOR_SIZE;
+                if (newSectors > 0 && newSectors < Sectors)
+                {
+                    VioScsiDbgBreak();
+                    SetSectorCountToCdb((PCDB)cmd->req.cmd.cdb, newSectors, sdbLen);
+                }
             }
         }
     }
@@ -1920,7 +1997,7 @@ ENTER_FN_SRB();
 
     ASSERT(SRB_FUNCTION(Srb) == SRB_FUNCTION_WMI);
     ASSERT(SRB_LENGTH(Srb)  == sizeof(SCSI_WMI_REQUEST_BLOCK));
-    ASSERT(SRB_DATA_TRANSFER_LENGTH(Srb) >= sizeof(ULONG));
+    ASSERT(SRB_GET_DATA_TRANSFER_LENGTH(Srb) >= sizeof(ULONG));
     ASSERT(SRB_DATA_BUFFER(Srb));
 
     if (!pSrbWmi)
@@ -2117,6 +2194,41 @@ ENTER_FN_SRB();
                         PageLength -= min(PageLength, offset);
                         IdentificationDescr = (PVPD_IDENTIFICATION_DESCRIPTOR)((ULONG_PTR)IdentificationDescr + offset);
                     } while (PageLength);
+                }
+            }
+            break;
+            case VPD_BLOCK_LIMITS: {
+                PVPD_BLOCK_LIMITS_PAGE BlockLimitsPage = (PVPD_BLOCK_LIMITS_PAGE)dataBuffer;
+                USHORT PageLength = 0;
+                REVERSE_BYTES_SHORT(&PageLength, &(BlockLimitsPage->PageLength));
+                if (PageLength >= sizeof(VPD_BLOCK_LIMITS)) {
+                    ULONG OptimalTransferLengthGranularity = 0;
+                    ULONG MaximumTransferLength = 0;
+                    ULONG OptimalTransferLength = 0;
+                    REVERSE_BYTES_SHORT(&OptimalTransferLengthGranularity, &BlockLimitsPage->OptimalTransferLengthGranularity);
+                    REVERSE_BYTES(&MaximumTransferLength, &BlockLimitsPage->MaximumTransferLength);
+                    REVERSE_BYTES(&OptimalTransferLength, &BlockLimitsPage->OptimalTransferLength);
+                    MaximumTransferLength = min(MaximumTransferLength, OptimalTransferLength);
+                    MaximumTransferLength *= 512;
+                    RhelDbgPrint(TRACE_LEVEL_ERROR, " MaximumTransferLength %lu (%lu)\n", MaximumTransferLength, adaptExt->max_transfer_length);
+                    adaptExt->max_transfer_length = min(MaximumTransferLength, adaptExt->max_transfer_length);
+                    if ((((ULONG_PTR)adaptExt->max_transfer_length) & (PAGE_SIZE - 1)) != 0)
+                    {
+                        VioScsiDbgBreak();
+                        (ULONG_PTR)(adaptExt->max_transfer_length) >>= PAGE_SHIFT;
+                        (ULONG_PTR)(adaptExt->max_transfer_length) <<= PAGE_SHIFT;
+                    }
+//                    DbgPrint(" MaximumTransferLength %lu (%lu)\n", MaximumTransferLength, adaptExt->max_transfer_length);
+//                    if (adaptExt->max_transfer_length > MaximumTransferLength){
+//                        RhelDbgPrint(TRACE_LEVEL_ERROR, " MaximumTransferLength %lu  OptimalTransferLength %lu\n", MaximumTransferLength, OptimalTransferLength * 512);
+////                        DbgPrint(" MaximumTransferLength %ul OptimalTransferLength %ul OptimalTransferLengthGranularity %ul )\n", MaximumTransferLength, OptimalTransferLength, OptimalTransferLengthGranularity);
+//                        adaptExt->max_transfer_length = MaximumTransferLength;
+//                        MaximumTransferLength /= 512;
+//                        REVERSE_BYTES(&BlockLimitsPage->MaximumTransferLength, &MaximumTransferLength);
+//                        if (OptimalTransferLength > MaximumTransferLength) {
+//                            REVERSE_BYTES(&BlockLimitsPage->OptimalTransferLength, &MaximumTransferLength);
+//                        }
+//                    }
                 }
             }
             break;

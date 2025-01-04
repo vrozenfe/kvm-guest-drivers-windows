@@ -245,6 +245,7 @@ typedef struct _SRB_EXTENSION {
     PSCSI_REQUEST_BLOCK   Srb;
     ULONG                 out;
     ULONG                 in;
+//    ULONG                 TransferLen;
     ULONG                 Xfer;
     VirtIOSCSICmd         cmd;
     PVIO_SG POINTER_ALIGN psgl;
@@ -325,6 +326,7 @@ typedef struct _ADAPTER_EXTENSION {
     BOOLEAN               dpc_ok;
     PSTOR_DPC             dpc;
     ULONG                 max_physical_breaks;
+    ULONG                 max_transfer_length;
     SCSI_WMILIB_CONTEXT   WmiLibContext;
     ULONGLONG             hba_id;
     PUCHAR                ser_num;
