@@ -100,6 +100,10 @@ SrbGetPnpInfo(_In_ PVOID Srb, ULONG* PnPFlags, ULONG* PnPAction) {
 #define SRB_SET_DATA_TRANSFER_LENGTH(Srb, Len) SrbSetDataTransferLength(Srb, Len)
 #define SRB_GET_DATA_TRANSFER_LENGTH(Srb) SrbGetDataTransferLength(Srb)
 #define SRB_GET_TIMEOUTVALUE(Srb) SrbGetTimeOutValue(Srb)
+#define SRB_GET_SENSE_INFO_BUFFER(Srb) SrbGetSenseInfoBuffer(Srb)
+#define SRB_GET_SENSE_INFO_BUFFER_LENGTH(Srb)SrbGetSenseInfoBufferLength(Srb)
+#define SRB_SET_SENSE_INFO_BUFFER(Srb, buf) SrbSetSenseInfoBuffer(Srb, buf)
+#define SRB_SET_SENSE_INFO_BUFFER_LENGTH(Srb, Len) SrbSetSenseInfoBufferLength(Srb, Len)
 
 VOID
 SendSRB(
