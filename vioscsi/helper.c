@@ -512,7 +512,7 @@ ENTER_FN();
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     srbExt = SRB_EXTENSION(Srb);
     srbControl = (PSRB_IO_CONTROL)SRB_DATA_BUFFER(Srb);
-    dataLen = SRB_DATA_TRANSFER_LENGTH(Srb);
+    dataLen = SRB_GET_DATA_TRANSFER_LENGTH(Srb);
     if (dataLen < (sizeof(SRB_IO_CONTROL) + sizeof(FIRMWARE_REQUEST_BLOCK))) {
         srbControl->ReturnCode = FIRMWARE_STATUS_INVALID_PARAMETER;
         SRB_SET_SRB_STATUS(Srb, SRB_STATUS_BAD_SRB_BLOCK_LENGTH);

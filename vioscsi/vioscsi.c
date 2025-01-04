@@ -909,7 +909,7 @@ HandleResponse(
     UCHAR senseInfoBufferLength = 0;
     PVOID senseInfoBuffer = NULL;
     UCHAR srbStatus = SRB_STATUS_SUCCESS;
-    ULONG srbDataTransferLen = SRB_DATA_TRANSFER_LENGTH(Srb);
+    ULONG srbDataTransferLen = SRB_GET_DATA_TRANSFER_LENGTH(Srb);
 
 ENTER_FN();
 
@@ -1642,7 +1642,7 @@ ENTER_FN();
                 " StorQueryCapabilities on %d::%d::%d\n",
                 SRB_PATH_ID(Srb), SRB_TARGET_ID(Srb), SRB_LUN(Srb));
             if (((SrbPnPFlags & SRB_PNP_FLAGS_ADAPTER_REQUEST) == 0) ||
-                (SRB_DATA_TRANSFER_LENGTH(Srb) >= sizeof(STOR_DEVICE_CAPABILITIES))) {
+                (SRB_GET_DATA_TRANSFER_LENGTH(Srb) >= sizeof(STOR_DEVICE_CAPABILITIES))) {
                 PSTOR_DEVICE_CAPABILITIES devCap =
                     (PSTOR_DEVICE_CAPABILITIES)SRB_DATA_BUFFER(Srb);
                 RtlZeroMemory(devCap, sizeof(*devCap));
@@ -1794,10 +1794,10 @@ CompleteRequest(
                     if (cdb) { // Check for SDV compliance
                         UCHAR OpCode = cdb->CDB6GENERIC.OperationCode;
                         RhelDbgPrint(TRACE_LEVEL_WARNING, "Response Time SRB 0x%p : time %I64d (%lu) : length %d : OpCode 0x%x (%s)\n",
-                            Srb, time_msec, SRB_GET_TIMEOUTVALUE(Srb) * 1000, SRB_DATA_TRANSFER_LENGTH(Srb),
+                            Srb, time_msec, SRB_GET_TIMEOUTVALUE(Srb) * 1000, SRB_GET_DATA_TRANSFER_LENGTH(Srb),
                             OpCode, DbgGetScsiOpStr(OpCode));
                         DbgPrint("Response Time SRB 0x%p : time %I64d (%lu) : length %d : OpCode 0x%x (%s)\n",
-                            Srb, time_msec, SRB_GET_TIMEOUTVALUE(Srb) * 1000, SRB_DATA_TRANSFER_LENGTH(Srb),
+                            Srb, time_msec, SRB_GET_TIMEOUTVALUE(Srb) * 1000, SRB_GET_DATA_TRANSFER_LENGTH(Srb),
                             OpCode, DbgGetScsiOpStr(OpCode));
                     }
                 }
@@ -1938,7 +1938,7 @@ ENTER_FN_SRB();
                                                 DeviceExtension,
                                                 &requestContext,
                                                 pSrbWmi->DataPath,
-                                                SRB_DATA_TRANSFER_LENGTH(Srb),
+                                                SRB_GET_DATA_TRANSFER_LENGTH(Srb),
                                                 SRB_DATA_BUFFER(Srb));
 
         retSize =  ScsiPortWmiGetReturnSize(&requestContext);
@@ -2078,7 +2078,7 @@ ENTER_FN_SRB();
 
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     dataBuffer = SRB_DATA_BUFFER(Srb);
-    dataLen = SRB_DATA_TRANSFER_LENGTH(Srb);
+    dataLen = SRB_GET_DATA_TRANSFER_LENGTH(Srb);
 
     if (cdb->CDB6INQUIRY3.EnableVitalProductData == 1) {
         switch (cdb->CDB6INQUIRY3.PageCode) {
@@ -2160,7 +2160,7 @@ VioScsiPatchInquiryData(
 
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     dataBuffer = SRB_DATA_BUFFER(Srb);
-    dataLen = SRB_DATA_TRANSFER_LENGTH(Srb);
+    dataLen = SRB_GET_DATA_TRANSFER_LENGTH(Srb);
 
     if (cdb->CDB6INQUIRY3.EnableVitalProductData == 1) {
         switch (cdb->CDB6INQUIRY3.PageCode) {
