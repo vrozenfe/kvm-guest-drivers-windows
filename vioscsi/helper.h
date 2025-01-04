@@ -77,6 +77,22 @@ SrbGetPnpInfo(_In_ PVOID Srb, ULONG* PnPFlags, ULONG* PnPAction) {
         *PnPAction = pPnpSrb->PnPAction;
     }
 }
+
+//__inline
+ULONG
+GetSectorCountFromCdb(
+    PCDB  Cdb,
+    ULONG CdbLength
+);
+
+VOID
+SetSectorCountToCdb(
+    PCDB  Cdb,
+    ULONG Sectors,
+    ULONG CdbLength
+);
+
+
 #define PSRB_TYPE PSTORAGE_REQUEST_BLOCK
 #define PSRB_WMI_DATA PSRBEX_DATA_WMI
 #define PSTOR_DEVICE_CAPABILITIES_TYPE PSTOR_DEVICE_CAPABILITIES_EX

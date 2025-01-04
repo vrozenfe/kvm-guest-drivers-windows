@@ -611,3 +611,45 @@ ENTER_FN();
     }
 EXIT_FN();
 }
+
+ULONG
+GetSectorCountFromCdb(
+    PCDB  Cdb,
+    ULONG CdbLength
+)
+{
+    ULONG sectorCount = 0;
+
+    if (CdbLength == 0x10) {
+        // 16 byte cdb
+        REVERSE_BYTES(&sectorCount, Cdb->CDB16.TransferLength);
+
+    }
+    else {
+        sectorCount = (ULONG)(Cdb->CDB10.TransferBlocksMsb << 8 |
+            Cdb->CDB10.TransferBlocksLsb);
+    }
+
+    return sectorCount;
+}
+
+VOID
+SetSectorCountToCdb(
+    PCDB  Cdb,
+    ULONG Sectors,
+    ULONG CdbLength
+)
+{
+    ULONG sectorCount = Sectors;
+
+    if (CdbLength == 0x10) {
+        // 16 byte cdb
+        REVERSE_BYTES(Cdb->CDB16.TransferLength , &sectorCount);
+    }
+    else {
+        Cdb->CDB10.TransferBlocksLsb = FIRSTBYTE(sectorCount);
+        Cdb->CDB10.TransferBlocksMsb = SECONDBYTE(sectorCount);
+    }
+}
+
+
