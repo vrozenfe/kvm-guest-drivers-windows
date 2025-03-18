@@ -219,6 +219,56 @@ VOID FirmwareRequest(
     IN PSRB_TYPE Srb
     );
 
+VOID InitMemoryDescriptor(
+    IN PVOID DeviceExtension,
+    IN PDMA_BUF_DESC desc,
+    IN PVOID va,
+    IN SIZE_T size,
+    IN PSTOR_PHYSICAL_ADDRESS pa
+);
+
+BOOLEAN
+AllocateDmaDescriptor(
+    IN PVOID DeviceExtension,
+    IN ULONG size,
+    IN NODE_REQUIREMENT PreferredNode,
+    OUT PDMA_BUF_DESC desc
+);
+
+BOOLEAN
+FreeDmaDescriptor(
+    IN PVOID DeviceExtension,
+    _Inout_ PDMA_BUF_DESC desc
+);
+
+BOOLEAN
+AllocateContiguousMemory(
+    IN PVOID DeviceExtension,
+    IN ULONG size,
+    IN NODE_REQUIREMENT PreferredNode,
+    OUT PDMA_BUF_DESC desc
+);
+
+BOOLEAN
+FreeContiguousMemory(
+    IN PVOID DeviceExtension,
+    _Inout_ PDMA_BUF_DESC desc
+);
+
+
+BOOLEAN
+AllocateDescriptors(
+    IN PVOID DeviceExtension,
+    IN PSTORAGE_REQUEST_BLOCK Srb,
+    IN ULONG Elements
+);
+
+BOOLEAN
+FreeDescriptors(
+    IN PVOID DeviceExtension,
+    IN PSTORAGE_REQUEST_BLOCK Srb
+);
+
 extern VirtIOSystemOps VioScsiSystemOps;
 
 #endif ___HELPER_H___

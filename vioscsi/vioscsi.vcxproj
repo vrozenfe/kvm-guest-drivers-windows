@@ -57,7 +57,8 @@
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Win10 Release|x64'">
-    <TargetVersion>Windows10</TargetVersion>
+    <TargetVersion>
+    </TargetVersion>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Win11 Release|x64'" Label="Configuration">
@@ -153,6 +154,7 @@
       <WppGenerateUsingTemplateFile Condition="'$(Configuration)|$(Platform)'=='Win11 Release|x64'">{km-StorDefault.tpl}*.tmh</WppGenerateUsingTemplateFile>
       <WppScanConfigurationData Condition="'$(Configuration)|$(Platform)'=='Win10 Release|x64'">trace.h</WppScanConfigurationData>
       <WppScanConfigurationData Condition="'$(Configuration)|$(Platform)'=='Win11 Release|x64'">trace.h</WppScanConfigurationData>
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Win10 Release|x64'">Disabled</Optimization>
     </ClCompile>
     <ClCompile>
       <WppEnabled Condition="'$(Configuration)|$(Platform)'=='Win10 Release|ARM64'">true</WppEnabled>
@@ -162,6 +164,9 @@
       <WppScanConfigurationData Condition="'$(Configuration)|$(Platform)'=='Win10 Release|ARM64'">trace.h</WppScanConfigurationData>
       <WppScanConfigurationData Condition="'$(Configuration)|$(Platform)'=='Win11 Release|ARM64'">trace.h</WppScanConfigurationData>
     </ClCompile>
+    <Link>
+      <GenerateDebugInformation Condition="'$(Configuration)|$(Platform)'=='Win10 Release|x64'">DebugFull</GenerateDebugInformation>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <Inf Include="vioscsi.inx" />

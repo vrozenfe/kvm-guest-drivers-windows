@@ -49,10 +49,10 @@ typedef struct VirtIOBufferDescriptor VIO_SG, *PVIO_SG;
 #define NTDDI_WINTHRESHOLD                  0x0A000000  /* ABRACADABRA_THRESHOLD */
 #endif
 
-#define PHYS_SEGMENTS           32
-#define MAX_PHYS_SEGMENTS       512
+#define PHYS_SEGMENTS           16
+#define MAX_PHYS_SEGMENTS       2048
 #define VIOSCSI_POOL_TAG        'SoiV'
-#define VIRTIO_MAX_SG            (1+1+MAX_PHYS_SEGMENTS+1) //cmd + resp + (MAX_PHYS_SEGMENTS + extra_page)
+#define VIRTIO_MAX_SG           (1+1+PHYS_SEGMENTS+1) //cmd + resp + (MAX_PHYS_SEGMENTS + extra_page)
 
 #define SECTOR_SIZE             512
 #define IO_PORT_LENGTH          0x40
@@ -240,18 +240,31 @@ typedef struct _VRING_DESC_ALIAS
 }VRING_DESC_ALIAS, *PVRING_DESC_ALIAS;
 
 #pragma pack(1)
+typedef struct _DMA_BUF_DESC {
+    SIZE_T                  sz;
+    PVOID POINTER_ALIGN     va;
+    STOR_PHYSICAL_ADDRESS   pa;
+}DMA_BUF_DESC, * PDMA_BUF_DESC;
+#pragma pack()
+
+
+#pragma pack(1)
 typedef struct _SRB_EXTENSION {
     LIST_ENTRY            list_entry;
     PSCSI_REQUEST_BLOCK   Srb;
     ULONG                 out;
     ULONG                 in;
     ULONG                 Xfer;
-    VirtIOSCSICmd         cmd;
-    PVIO_SG POINTER_ALIGN psgl;
-    PVRING_DESC_ALIAS POINTER_ALIGN pdesc;
+    ULONG                 elements;
+    ULONGLONG             time;
+
+    DMA_BUF_DESC          vio_sg_desc;
+    DMA_BUF_DESC          desc_alias_desc;
+    DMA_BUF_DESC          cmd_desc;
+
     VIO_SG                vio_sg[VIRTIO_MAX_SG];
     VRING_DESC_ALIAS      desc_alias[VIRTIO_MAX_SG];
-    ULONGLONG             time;
+    VirtIOSCSICmd         cmd;
 }SRB_EXTENSION, * PSRB_EXTENSION;
 #pragma pack()
 

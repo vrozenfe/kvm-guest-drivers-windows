@@ -36,8 +36,8 @@
 #include "helper.tmh"
 #endif
 
-#define SET_VA_PA() { ULONG len; va = adaptExt->indirect ? srbExt->pdesc : NULL; \
-                      pa = va ? StorPortGetPhysicalAddress(DeviceExtension, NULL, va, &len).QuadPart : 0; \
+#define SET_VA_PA() { ULONG len; va = adaptExt->indirect ? srbExt->desc_alias_desc.va : NULL; \
+                      pa = va ? srbExt->desc_alias_desc.pa.QuadPart : 0; \
                     }
 
 VOID
@@ -73,6 +73,13 @@ ENTER_FN_SRB();
 
     LOG_SRB_INFO();
 
+    srbExt = SRB_EXTENSION(Srb);
+
+    if (!srbExt) {
+        RhelDbgPrint(TRACE_LEVEL_INFORMATION, " No SRB Extenstion for SRB 0x%p \n", Srb);
+        return;
+    }
+
     if (adaptExt->num_queues > 1) {
         STARTIO_PERFORMANCE_PARAMETERS param;
         param.Size = sizeof(STARTIO_PERFORMANCE_PARAMETERS);
@@ -87,13 +94,6 @@ ENTER_FN_SRB();
         }
     }
 
-    srbExt = SRB_EXTENSION(Srb);
-
-    if (!srbExt) {
-        RhelDbgPrint(TRACE_LEVEL_INFORMATION, " No SRB Extenstion for SRB 0x%p \n", Srb);
-        return;
-    }
-
     MessageId = QUEUE_TO_MESSAGE(QueueNumber);
     vq_req_idx = QueueNumber - VIRTIO_SCSI_REQUEST_QUEUE_0;
 
@@ -104,12 +104,17 @@ ENTER_FN_SRB();
         return;
     }
 
-    VioScsiVQLock(DeviceExtension, MessageId, &LockHandle, FALSE);
     SET_VA_PA();
+
+    if (pa == 0)
+    {
+        VioScsiDbgBreak();
+    }
+    VioScsiVQLock(DeviceExtension, MessageId, &LockHandle, FALSE);
     add_buffer_req_status = virtqueue_add_buf(adaptExt->vq[QueueNumber],
-                                              srbExt->psgl,
+                                              srbExt->vio_sg_desc.va,
                                               srbExt->out, srbExt->in,
-                                              &srbExt->cmd, va, pa);
+                                              srbExt->cmd_desc.va, va, pa);
 
     if (add_buffer_req_status == VQ_ADD_BUFFER_SUCCESS) {
         notify = virtqueue_kick_prepare(adaptExt->vq[QueueNumber]);
@@ -149,10 +154,14 @@ SynchronizedTMFRoutine(
 
 ENTER_FN();
     SET_VA_PA();
+    if (pa == 0)
+    {
+        VioScsiDbgBreak();
+    }
     if (virtqueue_add_buf(adaptExt->vq[VIRTIO_SCSI_CONTROL_QUEUE],
-                     srbExt->psgl,
+                     srbExt->vio_sg_desc.va,
                      srbExt->out, srbExt->in,
-                     &srbExt->cmd, va, pa) >= 0){
+                     srbExt->cmd_desc.va, va, pa) >= 0){
         virtqueue_kick(adaptExt->vq[VIRTIO_SCSI_CONTROL_QUEUE]);
 EXIT_FN();
         return TRUE;
@@ -182,16 +191,24 @@ DeviceReset(
     PADAPTER_EXTENSION adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     PSCSI_REQUEST_BLOCK   Srb = &adaptExt->tmf_cmd.Srb;
     PSRB_EXTENSION        srbExt = adaptExt->tmf_cmd.SrbExtension;
-    VirtIOSCSICmd         *cmd = &srbExt->cmd;
+    PVirtIOSCSICmd        cmd = srbExt->cmd_desc.va;
     ULONG                 fragLen;
     ULONG                 sgElement;
+    STOR_PHYSICAL_ADDRESS pa = {0};
+    PVIO_SG              psgl = srbExt->vio_sg_desc.va;
 
 ENTER_FN();
+
     if (adaptExt->dump_mode) {
         return TRUE;
     }
+
+    VioScsiDbgBreak();
+
     ASSERT(adaptExt->tmf_infly == FALSE);
+
     Srb->SrbExtension = srbExt;
+
     RtlZeroMemory((PVOID)cmd, sizeof(VirtIOSCSICmd));
     cmd->srb = (PVOID)Srb;
     cmd->req.tmf.lun[0] = 1;
@@ -201,23 +218,35 @@ ENTER_FN();
     cmd->req.tmf.type = VIRTIO_SCSI_T_TMF;
     cmd->req.tmf.subtype = VIRTIO_SCSI_T_TMF_LOGICAL_UNIT_RESET;
 
-    srbExt->psgl = srbExt->vio_sg;
-    srbExt->pdesc = srbExt->desc_alias;
+    srbExt->vio_sg_desc.va = srbExt->vio_sg;
+    srbExt->desc_alias_desc.va = srbExt->desc_alias;
     sgElement = 0;
-    srbExt->psgl[sgElement].physAddr = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->req.tmf, &fragLen);
-    srbExt->psgl[sgElement].length   = sizeof(cmd->req.tmf);
+    pa.QuadPart = srbExt->cmd_desc.pa.QuadPart + FIELD_OFFSET(VirtIOSCSICmd, req);
+    if (pa.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+        pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->req.tmf, &fragLen);
+    }
+    psgl[sgElement].physAddr = pa;
+    psgl[sgElement].length   = sizeof(cmd->req.tmf);
     sgElement++;
     srbExt->out = sgElement;
-    srbExt->psgl[sgElement].physAddr = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->resp.tmf, &fragLen);
-    srbExt->psgl[sgElement].length = sizeof(cmd->resp.tmf);
+    pa.QuadPart = srbExt->cmd_desc.pa.QuadPart + FIELD_OFFSET(VirtIOSCSICmd, resp);
+    if (pa.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
+    psgl[sgElement].physAddr = pa;
+    psgl[sgElement].length = sizeof(cmd->resp.tmf);
     sgElement++;
     srbExt->in = sgElement - srbExt->out;
+    adaptExt->tmf_infly = TRUE;
     StorPortPause(DeviceExtension, 60);
     if (!SendTMF(DeviceExtension, Srb)) {
         StorPortResume(DeviceExtension);
+        adaptExt->tmf_infly = FALSE;
         return FALSE;
     }
-    adaptExt->tmf_infly = TRUE;
     return TRUE;
 }
 
@@ -333,7 +362,6 @@ ENTER_FN();
 
 EXIT_FN();
 }
-
 
 BOOLEAN
 InitVirtIODevice(
@@ -493,7 +521,16 @@ ENTER_FN();
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     RtlZeroMemory((PVOID)EventNode, sizeof(VirtIOSCSIEventNode));
     EventNode->sg.physAddr = StorPortGetPhysicalAddress(DeviceExtension, NULL, &EventNode->event, &fragLen);
+    if (EventNode->sg.physAddr.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
+
     EventNode->sg.length   = sizeof(VirtIOSCSIEvent);
+    if (EventNode->sg.physAddr.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
     return SynchronizedKickEventRoutine(DeviceExtension, (PVOID)EventNode);
 EXIT_FN();
 }
@@ -656,3 +693,231 @@ ENTER_FN();
     }
 EXIT_FN();
 }
+
+VOID InitMemoryDescriptor(
+    IN PVOID DeviceExtension,
+    IN PDMA_BUF_DESC desc,
+    IN PVOID va,
+    IN SIZE_T size,
+    IN PSTOR_PHYSICAL_ADDRESS pa
+)
+{
+    desc->va = va;
+    desc->sz = size;
+    desc->pa.QuadPart = 0;
+    if (pa)
+    {
+        desc->pa.QuadPart = pa->QuadPart;
+    }
+}
+
+BOOLEAN
+AllocateDmaDescriptor(
+    IN PVOID DeviceExtension,
+    IN ULONG size,
+    IN NODE_REQUIREMENT PreferredNode,
+    OUT PDMA_BUF_DESC desc
+)
+{
+    PVOID                 va = NULL;
+    STOR_PHYSICAL_ADDRESS pa = { 0 };
+    STOR_PHYSICAL_ADDRESS low = { 0 };
+    STOR_PHYSICAL_ADDRESS high = { 0 };
+    STOR_PHYSICAL_ADDRESS alighn = { 0 };
+    ULONG Status = STATUS_SUCCESS;
+
+    high.QuadPart = -1;
+
+    Status = StorPortAllocateDmaMemory(DeviceExtension,
+        size,
+        low,
+        high,
+        alighn,
+        MmCached,
+        PreferredNode, //MM_ANY_NODE_OK,
+        (PVOID*)&va,
+        &pa);
+    if (!NT_SUCCESS(Status))
+    {
+        RhelDbgPrint(TRACE_LEVEL_FATAL, " FAILED to allocate pool with status 0x%x\n", Status);
+        VioScsiDbgBreak();
+        return FALSE;
+    }
+    if (pa.QuadPart == 0)
+    {
+        RhelDbgPrint(TRACE_LEVEL_FATAL, " FAILED to allocate pool\n");
+        VioScsiDbgBreak();
+        return FALSE;
+    }
+    desc->pa = pa;
+    desc->va = va;
+    desc->sz = size;
+    return TRUE;
+}
+
+BOOLEAN
+FreeDmaDescriptor(
+    IN PVOID DeviceExtension,
+    _Inout_ PDMA_BUF_DESC desc
+)
+{
+    PVOID                   va;
+    STOR_PHYSICAL_ADDRESS   pa = { 0 };
+    SIZE_T                  sz;
+    ULONG                   Status = STATUS_SUCCESS;
+    
+    if (desc == NULL)
+    {
+        return FALSE;
+    }
+    va = desc->va;
+    pa = desc->pa;
+    sz = desc->sz;
+
+    if (sz && va && pa.QuadPart != 0)
+    {
+        Status = StorPortFreeDmaMemory(DeviceExtension,
+            va,
+            sz,
+            MmCached,
+            pa);
+        if (!NT_SUCCESS(Status))
+        {
+            RhelDbgPrint(TRACE_LEVEL_FATAL, " FAILED to free pool with status 0x%x\n", Status);
+            VioScsiDbgBreak();
+            return FALSE;
+        }
+        desc->va = 0;
+        desc->pa.QuadPart = 0;
+        desc->sz = 0;
+    }
+    return TRUE;
+}
+
+
+BOOLEAN
+AllocateContiguousMemory(
+    IN PVOID DeviceExtension,
+    IN ULONG size,
+    IN NODE_REQUIREMENT PreferredNode,
+    OUT PDMA_BUF_DESC desc
+)
+{
+    PVOID                 va = NULL;
+    STOR_PHYSICAL_ADDRESS pa = { 0 };
+    STOR_PHYSICAL_ADDRESS low = { 0 };
+    STOR_PHYSICAL_ADDRESS high = { 0 };
+    STOR_PHYSICAL_ADDRESS alighn = { 0 };
+    ULONG Status = STATUS_SUCCESS;
+    ULONG Length = 0;
+
+    high.QuadPart = -1;
+
+    Status = StorPortAllocateContiguousMemorySpecifyCacheNode(DeviceExtension,
+        size,
+        low,
+        high,
+        alighn,
+        MmCached,
+        PreferredNode, //MM_ANY_NODE_OK,
+        (PVOID*)&va);
+    if (!NT_SUCCESS(Status))
+    {
+        RhelDbgPrint(TRACE_LEVEL_FATAL, " FAILED to allocate pool with status 0x%x\n", Status);
+        VioScsiDbgBreak();
+        return FALSE;
+    }
+    desc->pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, va, &Length);
+    if (desc->pa.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
+    desc->va = va;
+    desc->sz = size;
+    return TRUE;
+}
+
+BOOLEAN
+FreeContiguousMemory(
+    IN PVOID DeviceExtension,
+    _Inout_ PDMA_BUF_DESC desc
+)
+{
+    PVOID                   va;
+    SIZE_T                  sz;
+    ULONG                   Status = STATUS_SUCCESS;
+
+    if (desc == NULL)
+    {
+        return FALSE;
+    }
+    va = desc->va;
+    sz = desc->sz;
+
+    if (sz && va)
+    {
+        Status = StorPortFreeContiguousMemorySpecifyCache(DeviceExtension,
+            va,
+            sz,
+            MmCached);
+        if (!NT_SUCCESS(Status))
+        {
+            RhelDbgPrint(TRACE_LEVEL_FATAL, " FAILED to free pool with status 0x%x\n", Status);
+            VioScsiDbgBreak();
+            return FALSE;
+        }
+        desc->va = 0;
+        desc->pa.QuadPart = 0;
+        desc->sz = 0;
+    }
+    return TRUE;
+}
+
+BOOLEAN
+FreeDescriptors(
+    IN PVOID DeviceExtension,
+    IN PSTORAGE_REQUEST_BLOCK Srb
+)
+{
+    PSRB_EXTENSION        srbExt;
+
+    ENTER_FN_SRB();
+    srbExt = SRB_EXTENSION(Srb);
+
+    FreeDmaDescriptor(DeviceExtension, &srbExt->vio_sg_desc);
+    FreeDmaDescriptor(DeviceExtension, &srbExt->desc_alias_desc);
+    FreeDmaDescriptor(DeviceExtension, &srbExt->cmd_desc);
+
+    EXIT_FN_SRB();
+    return TRUE;
+}
+
+
+
+BOOLEAN
+AllocateDescriptors(
+    IN PVOID DeviceExtension,
+    IN PSTORAGE_REQUEST_BLOCK Srb,
+    IN ULONG Elements
+)
+{
+    PADAPTER_EXTENSION    adaptExt;
+    PSRB_EXTENSION        srbExt;
+    PVOID psgl = NULL;
+    PVOID pdesc = NULL;
+    ENTER_FN_SRB();
+    srbExt = SRB_EXTENSION(Srb);
+    adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
+
+    Elements += 3;
+
+    if (!adaptExt->dump_mode && adaptExt->indirect)
+    {
+        AllocateDmaDescriptor(DeviceExtension, sizeof(VIO_SG) * Elements, MM_ANY_NODE_OK, &srbExt->vio_sg_desc);
+        AllocateDmaDescriptor(DeviceExtension, sizeof(VRING_DESC_ALIAS) * Elements, MM_ANY_NODE_OK, &srbExt->desc_alias_desc);
+        AllocateDmaDescriptor(DeviceExtension, sizeof(VirtIOSCSICmd), MM_ANY_NODE_OK, &srbExt->cmd_desc);
+    }
+    EXIT_FN_SRB();
+    return TRUE;
+}
+

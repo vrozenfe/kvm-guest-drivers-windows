@@ -132,6 +132,10 @@ static ULONGLONG mem_get_physical_address(void *context, void *virt)
 {
     ULONG uLength;
     STOR_PHYSICAL_ADDRESS pa = StorPortGetPhysicalAddress(context, NULL, virt, &uLength);
+    if (pa.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
     return pa.QuadPart;
 }
 

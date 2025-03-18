@@ -456,6 +456,8 @@ ENTER_FN();
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     RtlZeroMemory(adaptExt, sizeof(ADAPTER_EXTENSION));
 
+    VioScsiDbgBreak();
+
     adaptExt->dump_mode  = IsCrashDumpMode;
     adaptExt->hba_id     = HBA_ID;
     ConfigInfo->Master                      = TRUE;
@@ -469,6 +471,7 @@ ENTER_FN();
     ConfigInfo->SynchronizationModel        = StorSynchronizeFullDuplex;
     ConfigInfo->HwMSInterruptRoutine        = VioScsiMSInterrupt;
     ConfigInfo->InterruptSynchronizationMode=InterruptSynchronizePerMessage;
+    ConfigInfo->FeatureSupport |= STOR_ADAPTER_DMA_V3_PREFERRED;
 
     VioScsiWmiInitialize(DeviceExtension);
 
@@ -521,6 +524,7 @@ ENTER_FN();
 
     num_cpus = KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
     max_cpus = KeQueryMaximumProcessorCountEx(ALL_PROCESSOR_GROUPS);
+
     /* Set num_cpus and max_cpus to some sane values, to keep "Static Driver Verification" happy */
     num_cpus = max(1, num_cpus);
     max_cpus = max(1, max_cpus);
@@ -783,6 +787,11 @@ ENTER_FN();
          */
         if (adaptExt->dpc == NULL) {
             adaptExt->tmf_cmd.SrbExtension = (PSRB_EXTENSION)VioScsiPoolAlloc(DeviceExtension, sizeof(SRB_EXTENSION));
+            VioScsiDbgBreak();
+
+            AllocateDmaDescriptor(DeviceExtension, sizeof(VIO_SG) * 3, MM_ANY_NODE_OK, &adaptExt->tmf_cmd.SrbExtension->vio_sg_desc);
+            AllocateDmaDescriptor(DeviceExtension, sizeof(VRING_DESC_ALIAS) * 3, MM_ANY_NODE_OK, &adaptExt->tmf_cmd.SrbExtension->desc_alias_desc);
+            AllocateDmaDescriptor(DeviceExtension, sizeof(VirtIOSCSICmd), MM_ANY_NODE_OK, &adaptExt->tmf_cmd.SrbExtension->cmd_desc);
             adaptExt->events = (PVirtIOSCSIEventNode)VioScsiPoolAlloc(DeviceExtension, sizeof(VirtIOSCSIEventNode) * 8);
             adaptExt->dpc = (PSTOR_DPC)VioScsiPoolAlloc(DeviceExtension, sizeof(STOR_DPC) * adaptExt->num_queues);
         }
@@ -835,6 +844,7 @@ ENTER_FN();
 //                    adaptExt->perfFlags |= STOR_PERF_OPTIMIZE_FOR_COMPLETION_DURING_STARTIO;
                 }
                 perfData.Flags = adaptExt->perfFlags;
+                VioScsiDbgBreak();
                 RhelDbgPrint(TRACE_LEVEL_INFORMATION, "Applied PerfOpts Version = 0x%x, Flags = 0x%x, ConcurrentChannels = %d, FirstRedirectionMessageNumber = %d,LastRedirectionMessageNumber = %d\n",
                             perfData.Version,
                             perfData.Flags,
@@ -1346,35 +1356,39 @@ BOOLEAN
 VioScsiBuildIo(
     IN PVOID DeviceExtension,
     IN PSCSI_REQUEST_BLOCK Srb
-    )
+)
 {
     PCDB                  cdb;
     ULONG                 i;
     ULONG                 fragLen;
     ULONG                 sgElement;
-    ULONG                 sgMaxElements;
+    ULONG                 sgMaxElements = 0;
     PADAPTER_EXTENSION    adaptExt;
     PSRB_EXTENSION        srbExt;
     PSTOR_SCATTER_GATHER_LIST sgList;
-    VirtIOSCSICmd         *cmd;
+    VirtIOSCSICmd* cmd;
     UCHAR                 TargetId;
     UCHAR                 Lun;
+    STOR_PHYSICAL_ADDRESS pa = { 0 };
+    PVIO_SG               psgl = NULL;
+//    STARTIO_PERFORMANCE_PARAMETERS_V2 param = {0};
+//    ULONG status = STOR_STATUS_SUCCESS;
 
-ENTER_FN_SRB();
-    cdb      = SRB_CDB(Srb);
-    srbExt   = SRB_EXTENSION(Srb);
+    ENTER_FN_SRB();
+    cdb = SRB_CDB(Srb);
+    srbExt = SRB_EXTENSION(Srb);
     adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     TargetId = SRB_TARGET_ID(Srb);
-    Lun      = SRB_LUN(Srb);
+    Lun = SRB_LUN(Srb);
 
-    if( (SRB_PATH_ID(Srb) > (UCHAR)adaptExt->num_queues) ||
+    if ((SRB_PATH_ID(Srb) > (UCHAR)adaptExt->num_queues) ||
         (TargetId >= adaptExt->scsi_config.max_target) ||
         (Lun >= adaptExt->scsi_config.max_lun) ||
         adaptExt->bRemoved) {
         SRB_SET_SRB_STATUS(Srb, SRB_STATUS_NO_DEVICE);
         StorPortNotification(RequestComplete,
-                             DeviceExtension,
-                             Srb);
+            DeviceExtension,
+            Srb);
         return FALSE;
     }
 
@@ -1382,10 +1396,50 @@ ENTER_FN_SRB();
 
     RtlZeroMemory(srbExt, sizeof(*srbExt));
     srbExt->Srb = Srb;
-    srbExt->psgl = srbExt->vio_sg;
-    srbExt->pdesc = srbExt->desc_alias;
 
-    cmd = &srbExt->cmd;
+//    param.Version = STOR_PERF_VERSION;
+//    param.Size = sizeof(STARTIO_PERFORMANCE_PARAMETERS_V2);
+
+//    status = StorPortGetStartIoPerfParams(DeviceExtension, (PSCSI_REQUEST_BLOCK)Srb, (PSTARTIO_PERFORMANCE_PARAMETERS)&param);
+
+//    if (status == STOR_STATUS_SUCCESS)
+//    {
+//        srbExt->ChannelNumber = param.ChannelNumber;
+//        srbExt->InitiatingProcessor = param.InitiatingProcessor;
+//        srbExt->MessageNumber = param.MessageNumber;
+//    }
+//    else
+//    {
+//        VioScsiDbgBreak();
+//        RhelDbgPrint(TRACE_LEVEL_ERROR, " StorPortGetStartIoPerfParams failed srb 0x%p status 0x%x MessageNumber %d.\n", Srb, status, param.MessageNumber);
+//    }
+
+
+//    srbExt->psgl = srbExt->vio_sg;
+//    srbExt->pdesc = srbExt->desc_alias;
+//        srbExt->pcmd = &srbExt->cmd;
+
+
+    InitMemoryDescriptor(DeviceExtension, &srbExt->vio_sg_desc, srbExt->vio_sg, sizeof(srbExt->vio_sg), NULL);
+    InitMemoryDescriptor(DeviceExtension, &srbExt->desc_alias_desc, srbExt->desc_alias, sizeof(srbExt->desc_alias), NULL);
+    InitMemoryDescriptor(DeviceExtension, &srbExt->cmd_desc, &srbExt->cmd, sizeof(srbExt->cmd), NULL);
+
+
+    sgElement = 0;
+
+    sgList = StorPortGetScatterGatherList(DeviceExtension, Srb);
+    if (sgList)
+    {
+        sgMaxElements += min((adaptExt->max_physical_breaks + 1), sgList->NumberOfElements);
+    }
+
+    AllocateDescriptors(DeviceExtension, (PSTORAGE_REQUEST_BLOCK)Srb, sgMaxElements);
+
+    psgl = srbExt->vio_sg_desc.va;
+//    srbExt->pdesc = srbExt->desc_alias_desc.va;
+//    srbExt->pcmd = srbExt->cmd_desc.va;
+
+    cmd = srbExt->cmd_desc.va;
     cmd->srb = (PVOID)Srb;
     cmd->req.cmd.lun[0] = 1;
     cmd->req.cmd.lun[1] = TargetId;
@@ -1395,41 +1449,58 @@ ENTER_FN_SRB();
     cmd->req.cmd.task_attr = VIRTIO_SCSI_S_SIMPLE;
     cmd->req.cmd.prio = 0;
     cmd->req.cmd.crn = 0;
-    if (cdb != NULL) {
+
+    if (cdb != NULL)
+    {
         RtlCopyMemory(cmd->req.cmd.cdb, cdb, min(VIRTIO_SCSI_CDB_SIZE, SRB_CDB_LENGTH(Srb)));
     }
 
-    sgElement = 0;
-    srbExt->psgl[sgElement].physAddr = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->req.cmd, &fragLen);
-    srbExt->psgl[sgElement].length   = sizeof(cmd->req.cmd);
+//    pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->req.cmd, &fragLen);
+//    pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->req, &fragLen);
+    pa.QuadPart = srbExt->cmd_desc.pa.QuadPart + FIELD_OFFSET(VirtIOSCSICmd, req);
+    if (pa.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
+    psgl[sgElement].physAddr = pa;
+    psgl[sgElement].length   = sizeof(cmd->req.cmd);
     sgElement++;
 
-    sgList = StorPortGetScatterGatherList(DeviceExtension, Srb);
     if (sgList)
     {
         sgMaxElements = min((adaptExt->max_physical_breaks + 1), sgList->NumberOfElements);
 
         if((SRB_FLAGS(Srb) & SRB_FLAGS_DATA_OUT) == SRB_FLAGS_DATA_OUT) {
             for (i = 0; i < sgMaxElements; i++, sgElement++) {
-                srbExt->psgl[sgElement].physAddr = sgList->List[i].PhysicalAddress;
-                srbExt->psgl[sgElement].length = sgList->List[i].Length;
+                psgl[sgElement].physAddr = sgList->List[i].PhysicalAddress;
+                psgl[sgElement].length = sgList->List[i].Length;
                 srbExt->Xfer += sgList->List[i].Length;
             }
         }
     }
 
     srbExt->out = sgElement;
-    srbExt->psgl[sgElement].physAddr = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->resp.cmd, &fragLen);
-    srbExt->psgl[sgElement].length = sizeof(cmd->resp.cmd);
+
+//    pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->resp.cmd, &fragLen);
+//    pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, &cmd->resp, &fragLen);
+    pa.QuadPart = srbExt->cmd_desc.pa.QuadPart + FIELD_OFFSET(VirtIOSCSICmd, resp);
+
+    if (pa.QuadPart == 0)
+    {
+        VioScsiDbgBreak();
+    }
+    psgl[sgElement].physAddr = pa;
+    psgl[sgElement].length = sizeof(cmd->resp.cmd);
     sgElement++;
+
     if (sgList)
     {
         sgMaxElements = min((adaptExt->max_physical_breaks + 1), sgList->NumberOfElements);
 
         if((SRB_FLAGS(Srb) & SRB_FLAGS_DATA_OUT) != SRB_FLAGS_DATA_OUT) {
             for (i = 0; i < sgMaxElements; i++, sgElement++) {
-                srbExt->psgl[sgElement].physAddr = sgList->List[i].PhysicalAddress;
-                srbExt->psgl[sgElement].length = sgList->List[i].Length;
+                psgl[sgElement].physAddr = sgList->List[i].PhysicalAddress;
+                psgl[sgElement].length = sgList->List[i].Length;
                 srbExt->Xfer += sgList->List[i].Length;
             }
         }
@@ -1792,6 +1863,7 @@ CompleteRequest(
             }
         }
     }
+    FreeDescriptors(DeviceExtension, Srb);
     StorPortNotification(RequestComplete,
                          DeviceExtension,
                          Srb);

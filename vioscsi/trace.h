@@ -45,7 +45,7 @@ char *DbgGetScsiOpStr(IN UCHAR opCode);
 void InitializeDebugPrints(IN PDRIVER_OBJECT  DriverObject, IN PUNICODE_STRING RegistryPath);
 
 #if !defined(EVENT_TRACING)
-#define define DBG 1
+#define DBG 1
 #define PRINT_DEBUG 1
 #if !defined(PRINT_DEBUG)
 #define COM_DEBUG 1
@@ -77,7 +77,7 @@ extern int nVioscsiDebugLevel;
     if ((!bDebugPrint) || Level > nVioscsiDebugLevel) {} \
     else VirtioDebugPrintProc (MSG, __VA_ARGS__)
 #define VioScsiDbgBreak()\
-    if (KD_DEBUGGER_ENABLED && !KD_DEBUGGER_NOT_PRESENT) DbgBreakPoint();
+    if (KD_DEBUGGER_ENABLED && !KD_DEBUGGER_NOT_PRESENT && bBreakAlways) DbgBreakPoint();
 #else
 #define RhelDbgPrint(Level, MSG, ...)
 #define VioScsiDbgBreak()
@@ -159,6 +159,9 @@ extern int nVioscsiDebugLevel;
 // end_wpp
 #define WPP_SRBINFOLEVEL_ENABLED(LEVEL) WPP_LEVEL_ENABLED(LEVEL)
 #define WPP_SRBINFOLEVEL_LOGGER(LEVEL) WPP_LEVEL_LOGGER(LEVEL)
+
+
+#define VioScsiDbgBreak()
 
 #endif
 

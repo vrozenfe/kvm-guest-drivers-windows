@@ -33,7 +33,7 @@
 int virtioDebugLevel;
 int bDebugPrint;
 int nVioscsiDebugLevel;
-
+int bBreakAlways;
 
 #if !defined(EVENT_TRACING)
 
@@ -88,6 +88,7 @@ void InitializeDebugPrints(IN PDRIVER_OBJECT  DriverObject, IN PUNICODE_STRING R
     //TBD - Read nDebugLevel and bDebugPrint from the registry
     bDebugPrint = 1;
     virtioDebugLevel = 0;
+    bBreakAlways = 1;
     nVioscsiDebugLevel = TRACE_LEVEL_ERROR;
 
 #if defined(PRINT_DEBUG)
@@ -106,6 +107,7 @@ void InitializeDebugPrints(IN PDRIVER_OBJECT  DriverObject, IN PUNICODE_STRING R
     //TBD - Read nDebugLevel and bDebugPrint from the registry
     bDebugPrint = 0;
     virtioDebugLevel = 0;
+    bBreakAlways = 0;
     nVioscsiDebugLevel = 4;// TRACE_LEVEL_ERROR;
 }
 
