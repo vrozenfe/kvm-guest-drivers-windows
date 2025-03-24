@@ -106,10 +106,11 @@ ENTER_FN_SRB();
 
     SET_VA_PA();
 
-    if (pa == 0)
+    if (pa == 0 && adaptExt->indirect)
     {
         VioScsiDbgBreak();
     }
+
     VioScsiVQLock(DeviceExtension, MessageId, &LockHandle, FALSE);
     add_buffer_req_status = virtqueue_add_buf(adaptExt->vq[QueueNumber],
                                               srbExt->vio_sg_desc.va,
@@ -154,10 +155,12 @@ SynchronizedTMFRoutine(
 
 ENTER_FN();
     SET_VA_PA();
-    if (pa == 0)
+
+    if (pa == 0 && adaptExt->indirect)
     {
         VioScsiDbgBreak();
     }
+
     if (virtqueue_add_buf(adaptExt->vq[VIRTIO_SCSI_CONTROL_QUEUE],
                      srbExt->vio_sg_desc.va,
                      srbExt->out, srbExt->in,
@@ -702,12 +705,20 @@ VOID InitMemoryDescriptor(
     IN PSTOR_PHYSICAL_ADDRESS pa
 )
 {
+    PADAPTER_EXTENSION    adaptExt;
+    adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
+
     desc->va = va;
     desc->sz = size;
     desc->pa.QuadPart = 0;
     if (pa)
     {
         desc->pa.QuadPart = pa->QuadPart;
+    }
+    else if (!adaptExt->dmar)
+    {
+        ULONG dummy = 0;
+        desc->pa = StorPortGetPhysicalAddress(DeviceExtension, NULL, va, &dummy);
     }
 }
 
@@ -831,6 +842,7 @@ AllocateContiguousMemory(
     if (desc->pa.QuadPart == 0)
     {
         VioScsiDbgBreak();
+        return FALSE;
     }
     desc->va = va;
     desc->sz = size;
@@ -880,13 +892,24 @@ FreeDescriptors(
 )
 {
     PSRB_EXTENSION        srbExt;
+    PADAPTER_EXTENSION    adaptExt;
 
     ENTER_FN_SRB();
+    adaptExt = (PADAPTER_EXTENSION)DeviceExtension;
     srbExt = SRB_EXTENSION(Srb);
 
-    FreeDmaDescriptor(DeviceExtension, &srbExt->vio_sg_desc);
-    FreeDmaDescriptor(DeviceExtension, &srbExt->desc_alias_desc);
-    FreeDmaDescriptor(DeviceExtension, &srbExt->cmd_desc);
+    if (adaptExt->dmar)
+    {
+        FreeDmaDescriptor(DeviceExtension, &srbExt->vio_sg_desc);
+        FreeDmaDescriptor(DeviceExtension, &srbExt->desc_alias_desc);
+        FreeDmaDescriptor(DeviceExtension, &srbExt->cmd_desc);
+    }
+    else
+    {
+        FreeContiguousMemory(DeviceExtension, &srbExt->vio_sg_desc);
+        FreeContiguousMemory(DeviceExtension, &srbExt->desc_alias_desc);
+        FreeContiguousMemory(DeviceExtension, &srbExt->cmd_desc);
+    }
 
     EXIT_FN_SRB();
     return TRUE;
@@ -913,9 +936,37 @@ AllocateDescriptors(
 
     if (!adaptExt->dump_mode && adaptExt->indirect)
     {
-        AllocateDmaDescriptor(DeviceExtension, sizeof(VIO_SG) * Elements, MM_ANY_NODE_OK, &srbExt->vio_sg_desc);
-        AllocateDmaDescriptor(DeviceExtension, sizeof(VRING_DESC_ALIAS) * Elements, MM_ANY_NODE_OK, &srbExt->desc_alias_desc);
-        AllocateDmaDescriptor(DeviceExtension, sizeof(VirtIOSCSICmd), MM_ANY_NODE_OK, &srbExt->cmd_desc);
+        if (adaptExt->dmar)
+        {
+            if (!AllocateDmaDescriptor(DeviceExtension, sizeof(VIO_SG) * Elements, MM_ANY_NODE_OK, &srbExt->vio_sg_desc))
+            {
+                return FALSE;
+            }
+            if (!AllocateDmaDescriptor(DeviceExtension, sizeof(VRING_DESC_ALIAS) * Elements, MM_ANY_NODE_OK, &srbExt->desc_alias_desc))
+            {
+                return FALSE;
+            }
+            if (!AllocateDmaDescriptor(DeviceExtension, sizeof(VirtIOSCSICmd), MM_ANY_NODE_OK, &srbExt->cmd_desc))
+            {
+                return FALSE;
+            }
+        }
+        else
+        {
+            if (!AllocateContiguousMemory(DeviceExtension, sizeof(VIO_SG) * Elements, MM_ANY_NODE_OK, &srbExt->vio_sg_desc))
+            {
+                return FALSE;
+            }
+            if (!AllocateContiguousMemory(DeviceExtension, sizeof(VRING_DESC_ALIAS) * Elements, MM_ANY_NODE_OK, &srbExt->desc_alias_desc))
+            {
+                return FALSE;
+            }
+            if (!AllocateContiguousMemory(DeviceExtension, sizeof(VirtIOSCSICmd), MM_ANY_NODE_OK, &srbExt->cmd_desc))
+            {
+                return FALSE;
+            }
+
+        }
     }
     EXIT_FN_SRB();
     return TRUE;

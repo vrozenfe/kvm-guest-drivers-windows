@@ -445,6 +445,7 @@ VioScsiFindAdapter(
     ULONG              num_cpus;
     ULONG              max_cpus;
     ULONG              max_queues;
+    OSVERSIONINFOEXW   osVersion;
 
     UNREFERENCED_PARAMETER( HwContext );
     UNREFERENCED_PARAMETER( BusInformation );
@@ -460,6 +461,7 @@ ENTER_FN();
 
     adaptExt->dump_mode  = IsCrashDumpMode;
     adaptExt->hba_id     = HBA_ID;
+
     ConfigInfo->Master                      = TRUE;
     ConfigInfo->ScatterGather               = TRUE;
     ConfigInfo->DmaWidth                    = Width32Bits;
@@ -474,6 +476,16 @@ ENTER_FN();
     ConfigInfo->FeatureSupport |= STOR_ADAPTER_DMA_V3_PREFERRED;
 
     VioScsiWmiInitialize(DeviceExtension);
+
+    if (!adaptExt->dump_mode)
+    {
+        osVersion.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXW);
+        if ((RtlGetVersion((POSVERSIONINFOW)&osVersion) == STATUS_SUCCESS)&&
+            osVersion.dwBuildNumber >= 17134 /*Redstone 4*/)
+        {
+            adaptExt->dmar = TRUE;
+        }
+    }
 
     if (!InitHW(DeviceExtension, ConfigInfo)) {
         RhelDbgPrint(TRACE_LEVEL_FATAL, " Cannot initialize HardWare\n");
@@ -1371,8 +1383,6 @@ VioScsiBuildIo(
     UCHAR                 Lun;
     STOR_PHYSICAL_ADDRESS pa = { 0 };
     PVIO_SG               psgl = NULL;
-//    STARTIO_PERFORMANCE_PARAMETERS_V2 param = {0};
-//    ULONG status = STOR_STATUS_SUCCESS;
 
     ENTER_FN_SRB();
     cdb = SRB_CDB(Srb);
@@ -1397,29 +1407,6 @@ VioScsiBuildIo(
     RtlZeroMemory(srbExt, sizeof(*srbExt));
     srbExt->Srb = Srb;
 
-//    param.Version = STOR_PERF_VERSION;
-//    param.Size = sizeof(STARTIO_PERFORMANCE_PARAMETERS_V2);
-
-//    status = StorPortGetStartIoPerfParams(DeviceExtension, (PSCSI_REQUEST_BLOCK)Srb, (PSTARTIO_PERFORMANCE_PARAMETERS)&param);
-
-//    if (status == STOR_STATUS_SUCCESS)
-//    {
-//        srbExt->ChannelNumber = param.ChannelNumber;
-//        srbExt->InitiatingProcessor = param.InitiatingProcessor;
-//        srbExt->MessageNumber = param.MessageNumber;
-//    }
-//    else
-//    {
-//        VioScsiDbgBreak();
-//        RhelDbgPrint(TRACE_LEVEL_ERROR, " StorPortGetStartIoPerfParams failed srb 0x%p status 0x%x MessageNumber %d.\n", Srb, status, param.MessageNumber);
-//    }
-
-
-//    srbExt->psgl = srbExt->vio_sg;
-//    srbExt->pdesc = srbExt->desc_alias;
-//        srbExt->pcmd = &srbExt->cmd;
-
-
     InitMemoryDescriptor(DeviceExtension, &srbExt->vio_sg_desc, srbExt->vio_sg, sizeof(srbExt->vio_sg), NULL);
     InitMemoryDescriptor(DeviceExtension, &srbExt->desc_alias_desc, srbExt->desc_alias, sizeof(srbExt->desc_alias), NULL);
     InitMemoryDescriptor(DeviceExtension, &srbExt->cmd_desc, &srbExt->cmd, sizeof(srbExt->cmd), NULL);
@@ -1433,11 +1420,18 @@ VioScsiBuildIo(
         sgMaxElements += min((adaptExt->max_physical_breaks + 1), sgList->NumberOfElements);
     }
 
-    AllocateDescriptors(DeviceExtension, (PSTORAGE_REQUEST_BLOCK)Srb, sgMaxElements);
+    if (!AllocateDescriptors(DeviceExtension, (PSTORAGE_REQUEST_BLOCK)Srb, sgMaxElements))
+    {
+        FreeDescriptors(DeviceExtension, (PSTORAGE_REQUEST_BLOCK)Srb);
+        SRB_SET_SRB_STATUS(Srb, SRB_STATUS_ERROR);
+//        SRB_SET_SRB_STATUS(Srb, STOR_STATUS_INSUFFICIENT_RESOURCES);
+        StorPortNotification(RequestComplete,
+            DeviceExtension,
+            Srb);
+        return FALSE;
+    }
 
     psgl = srbExt->vio_sg_desc.va;
-//    srbExt->pdesc = srbExt->desc_alias_desc.va;
-//    srbExt->pcmd = srbExt->cmd_desc.va;
 
     cmd = srbExt->cmd_desc.va;
     cmd->srb = (PVOID)Srb;

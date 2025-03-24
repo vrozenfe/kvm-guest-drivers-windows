@@ -324,6 +324,7 @@ typedef struct _ADAPTER_EXTENSION {
     BOOLEAN               msix_enabled;
     BOOLEAN               msix_one_vector;
     BOOLEAN               indirect;
+    BOOLEAN               dmar;
 
     TMF_COMMAND           tmf_cmd;
     BOOLEAN               tmf_infly;
